@@ -1,5 +1,6 @@
 """
-# Copyright (C) 2013-2016 Stray <stray411@hotmail.com>
+# Copyright (C) 2013-2017 Stray <stray411@hotmail.com>
+# Modifications by Matt (Blythe) - 2017
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -151,11 +152,14 @@ class ClyphX(ControlSurface):
                             if len(device_action) > 1:
                                 device_args = device_action[1]
                             if device_args and device_args.split()[0] in DEVICE_ACTIONS:
-                                getattr(self._device_actions, DEVICE_ACTIONS[device_args.split()[0]])(device_action[0], t, xclip, ident, device_args)
+                                for d in device_action[0]:
+                                    getattr(self._device_actions, DEVICE_ACTIONS[device_args.split()[0]])(d, t, xclip, ident, device_args)
                             elif device_args and 'CHAIN' in device_args:
-                                self._device_actions.dispatch_chain_action(device_action[0], t, xclip, ident, device_args)
+                                for d in device_action[0]:
+                                    self._device_actions.dispatch_chain_action(d, t, xclip, ident, device_args)
                             elif action_name.startswith('DEV'):
-                                self._device_actions.set_device_on_off(device_action[0], t, xclip, ident, device_args)
+                                for d in device_action[0]:
+                                    self._device_actions.set_device_on_off(d, t, xclip, ident, device_args)
                     elif action_name.startswith('CLIP') and t in self.song().tracks:
                         clip_action = self.get_clip_to_operate_on(t, action_name, args)
                         clip_args = None
@@ -488,10 +492,69 @@ class ClyphX(ControlSurface):
                 name = name.replace('"', '', 1)
         return name
 
+    def get_device_rec(self,device,dev_split,devices=None):
+        if devices == None:
+            devices = []
+
+        try:
+            # get all child devices and add to subdevices list
+            subdevices = []
+            try:
+                for d in device.devices:
+                    subdevices.append(d)
+            except AttributeError:
+                pass
+
+            # get all child chains and add to subdevices list
+            try:
+                for chain in device.chains:
+                    subdevices.append(chain) # return 1st device in chain
+            except AttributeError:
+                pass
+            except IndexError:
+                pass
+
+            # filter subdevices based on globbing or add indexed subdevice
+            subdevices_filtered = []
+            if dev_split[0] == '*' or dev_split[0] == '**':
+                for d in subdevices:
+                    subdevices_filtered.append(d)
+            else:
+                try:
+                    subdevices_filtered.append(subdevices[int(dev_split[0]) - 1])
+                except IndexError:
+                    pass
+
+            # Add devices to devices list recursively
+            if len(dev_split) > 1:
+                for d in subdevices_filtered:
+                    self.get_device_rec(d, dev_split[1:], devices=devices)
+            elif dev_split[0] == '**':
+                if len(subdevices_filtered):
+                    for d in subdevices_filtered:
+                        self.get_device_rec(d,['**'], devices=devices)
+                    else:
+                        self.get_device_rec(device,['*'], devices=devices)
+                        # Note: could directly return devices here instead
+            else:
+                # base recursion case
+                for d in subdevices_filtered:
+                    try:
+                        # if chain, append first device on chain:
+                        devices.append(d.devices[0])
+                    except AttributeError:
+                        # otherwise append device
+                        devices.append(d)
+
+            return devices
+
+        except:
+            raise
 
     def get_device_to_operate_on(self, track, action_name, args):
         """ Get device to operate on and action to perform with args """
         device = None
+        devices = []
         device_args = args
         if 'DEV"' in action_name:
             dev_name = action_name[action_name.index('"')+1:]
@@ -510,25 +573,22 @@ class ClyphX(ControlSurface):
                 if device == None:
                     if track.devices:
                         device = track.devices[0]
+                devices.append(device)
             else:
                 try:
                     dev_num = action_name.replace('DEV', '')
                     if '.' in dev_num and self._can_have_nested_devices:
                         dev_split = dev_num.split('.')
-                        top_level = track.devices[int(dev_split[0]) - 1]
-                        if top_level and top_level.can_have_chains:
-                            device = top_level.chains[int(dev_split[1]) - 1].devices[0]
-                            if len(dev_split) > 2:
-                                device = top_level.chains[int(dev_split[1]) - 1].devices[int(dev_split[2]) - 1]
                     else:
-                        device = track.devices[int(dev_num) - 1]
+                        dev_split = [dev_num]
+                    devices = list(self.get_device_rec(track,dev_split,[]))
                 except: pass
         if self._is_debugging:
             debug_string = 'None'
-            if device:
-                debug_string = device.name
-            self.log_message('get_device_to_operate_on returning device=' + str(debug_string) + ' and device args=' + str(device_args))
-        return (device, device_args)
+            if devices:
+                debug_string = "".join([str(item.name)+'; ' for item in devices])
+            self.log_message('get_device_to_operate_on returning devices=' + str(debug_string) + ' and device args=' + str(device_args))
+        return (devices, device_args)
 
 
     def get_clip_to_operate_on(self, track, action_name, args):
