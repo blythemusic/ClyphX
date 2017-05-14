@@ -27,6 +27,7 @@ from __future__ import with_statement
 import Live
 import sys
 from functools import partial
+from fnmatch import fnmatch
 from _Framework.ControlSurface import ControlSurface
 from _Framework.ControlSurfaceComponent import ControlSurfaceComponent
 from _Framework import Task
@@ -564,9 +565,8 @@ class ClyphX(ControlSurface):
             if '"' in dev_name:
                 dev_name = dev_name[0:dev_name.index('"')]
             for dev in track.devices:
-                if dev.name.upper() == dev_name:
-                    device = dev
-                    break
+                if fnmatch(dev.name.upper(),dev_name):
+                    devices.append(dev)
         else:
             if action_name == 'DEV':
                 device = track.view.selected_device
